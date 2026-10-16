@@ -21,7 +21,11 @@ rust-embed = { version = "8.13.0", features = ["compression"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono"] }
+# ⚠️ 不要加回 `macros`：它只提供 query!/query_as! 与 FromRow 派生宏，本项目
+# 全部使用运行时的 sqlx::query(...) 并手写行映射（见 src/store/mod.rs），
+# 而那个 proc-macro dylib 在本机 release 配置下会被链接成损坏的 Mach-O
+# （dlopen 报 "mis-aligned LINKEDIT string pool"），导致 cargo build --release 必然失败。
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "chrono"] }
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["full"] }
 tokio-stream = "0.1.19"
