@@ -2,6 +2,9 @@
 name = "ffmpeg-web-rust"
 version = "0.1.0"
 edition = "2024"
+# 仓库里还有两个自检工具（src/bin/ffmpeg_selftest.rs、store_selftest.rs），
+# 不指定默认二进制的话 `cargo run` 会报「could not determine which binary to run」。
+default-run = "ffmpeg-web-rust"
 
 [dependencies]
 anyhow = "1.0.104"
