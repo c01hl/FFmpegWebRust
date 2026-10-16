@@ -20,6 +20,41 @@
 
 ---
 
+## 界面
+
+> 截图由 [`tools/screenshots/capture.mjs`](tools/screenshots/capture.mjs) 从真实运行的界面生成
+> （无头 Chrome + DevTools Protocol，会先把界面驱动到有内容的状态再截图），界面改了重跑一次即可。
+
+### 首页 — 环境状态、本机硬件编码能力与最近任务
+
+![首页](readmefiles/index.png)
+
+### 转换 — 输入/输出、模板选择（不可用模板会说明原因）与参数
+
+![转换](readmefiles/cv.png)
+
+### 转换 · 命令预览 — 实际会用哪个编码器、完整命令可一键复制
+
+![转换 · 命令预览](readmefiles/cv-preview.png)
+
+### 模板 — 每个模板都标出在本机是否可用，以及本机会用哪个编码器
+
+![模板](readmefiles/tpl.png)
+
+### 设置
+
+![设置](readmefiles/setting.png)
+
+### 深色主题
+
+跟随系统 / 浅色 / 深色三档，切换后立即生效并记住：
+
+| 首页 | 转换 |
+| --- | --- |
+| ![深色首页](readmefiles/dark-index.png) | ![深色转换](readmefiles/dark-convert.png) |
+
+---
+
 ## 功能
 
 ### 跨平台硬件编码加速
