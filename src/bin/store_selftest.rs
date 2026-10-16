@@ -99,14 +99,30 @@ async fn main() -> ExitCode {
 async fn run(path: &Path, checks: &mut Checks) -> anyhow::Result<()> {
     let store = Store::open(path).await?;
 
+    check_pragmas(checks, &store).await?;
     check_settings(checks, &store).await?;
     check_templates(checks, &store).await?;
     check_batches(checks, &store).await?;
     check_tasks(checks, &store).await?;
     check_encoders(checks, &store).await?;
+    check_batch_cascade(checks, &store).await?;
+    check_concurrent_writes(checks, &store).await?;
     check_in_memory(checks).await?;
     check_settings_service(checks, &store).await?;
 
+    Ok(())
+}
+
+/// 连接级 PRAGMA：WAL / 外键 / busy_timeout 必须真的生效
+async fn check_pragmas(checks: &mut Checks, store: &Store) -> anyhow::Result<()> {
+    let journal_mode = store.journal_mode().await?;
+    let foreign_keys = store.foreign_keys_enabled().await?;
+    let busy_timeout = store.busy_timeout_ms().await?;
+    checks.expect(
+        "PRAGMA 生效（journal_mode=wal / foreign_keys=1 / busy_timeout>0）",
+        journal_mode == "wal" && foreign_keys && busy_timeout > 0,
+        || format!("journal_mode={journal_mode} foreign_keys={foreign_keys} busy_timeout={busy_timeout}"),
+    );
     Ok(())
 }
 
@@ -559,6 +575,98 @@ async fn check_encoders(checks: &mut Checks, store: &Store) -> anyhow::Result<()
         "clear_encoders",
         cleared == 2 && store.load_encoders().await?.is_empty(),
         || format!("清理了 {cleared} 条"),
+    );
+
+    Ok(())
+}
+
+/// 删除批次必须级联删掉子任务（一条事务）
+async fn check_batch_cascade(checks: &mut Checks, store: &Store) -> anyhow::Result<()> {
+    let now = at(Utc::now().timestamp_millis());
+    let batch = BatchTask {
+        id: ffmpeg_web_rust::models::new_id(),
+        name: "批量任务 - 级联删除自检".to_string(),
+        template_id: ffmpeg_web_rust::models::new_id(),
+        total_files: 2,
+        completed_files: 0,
+        failed_files: 0,
+        status: TaskStatus::Pending,
+        created_at: now,
+        completed_at: None,
+    };
+    store.insert_batch(&batch).await?;
+
+    for index in 0..2 {
+        let task = ConversionTask {
+            id: ffmpeg_web_rust::models::new_id(),
+            input_path: format!("/tmp/cascade-{index}.mp4"),
+            output_path: format!("/tmp/cascade-{index}-out.mp4"),
+            template_id: batch.template_id.clone(),
+            created_at: at(now.timestamp_millis() + index as i64),
+            batch_id: Some(batch.id.clone()),
+            ..ConversionTask::default()
+        };
+        store.insert_task(&task).await?;
+    }
+
+    let children = store.list_tasks_by_batch(&batch.id).await?;
+    let removed = store.delete_batch(&batch.id).await?;
+    checks.expect(
+        "delete_batch 级联删除子任务",
+        children.len() == 2
+            && removed == 1
+            && store.list_tasks_by_batch(&batch.id).await?.is_empty()
+            && store.get_batch(&batch.id).await?.is_none(),
+        || format!("子任务 {} 条，删除返回 {removed}", children.len()),
+    );
+
+    Ok(())
+}
+
+/// 并发写入：队列的多个 worker 同时落库，不允许出现 SQLITE_BUSY
+async fn check_concurrent_writes(checks: &mut Checks, store: &Store) -> anyhow::Result<()> {
+    let pending_before = store.list_tasks_by_status(TaskStatus::Pending).await?.len();
+    let total_before = store.count_tasks().await?;
+
+    let mut handles = Vec::new();
+    for index in 0..24 {
+        let store = store.clone();
+        handles.push(tokio::spawn(async move {
+            let task = ConversionTask {
+                id: ffmpeg_web_rust::models::new_id(),
+                input_path: format!("/tmp/concurrent-{index}.mp4"),
+                output_path: format!("/tmp/concurrent-{index}-out.mp4"),
+                template_id: ffmpeg_web_rust::models::new_id(),
+                created_at: at(BASE_MS + index as i64),
+                ..ConversionTask::default()
+            };
+            let id = task.id.clone();
+            store.insert_task(&task).await.map(|_| id)
+        }));
+    }
+
+    let mut inserted = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    for handle in handles {
+        match handle.await {
+            Ok(Ok(_)) => inserted += 1,
+            Ok(Err(error)) => failures.push(format!("{error:#}")),
+            Err(error) => failures.push(format!("任务 panic：{error}")),
+        }
+    }
+
+    let pending_after = store.list_tasks_by_status(TaskStatus::Pending).await?.len();
+    checks.expect(
+        "并发写入 24 条任务（连接池 + WAL + busy_timeout）",
+        failures.is_empty() && inserted == 24 && pending_after == pending_before + 24,
+        || format!("成功 {inserted} 条，失败 {failures:?}，库中 Pending={pending_after}"),
+    );
+
+    let cleared = store.clear_tasks().await?;
+    checks.expect(
+        "clear_tasks 清空全部任务",
+        cleared == (total_before as usize + 24) && store.count_tasks().await? == 0,
+        || format!("清理 {cleared} 条（预期 {}）", total_before + 24),
     );
 
     Ok(())

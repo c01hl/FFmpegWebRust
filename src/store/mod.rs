@@ -94,10 +94,14 @@ fn from_json_map(text: Option<String>) -> Option<std::collections::HashMap<Strin
 }
 
 /// `tasks` 表的列清单（顺序与 `row_to_task` 一致）
+///
+/// ⚠️ `current_time` **必须加双引号**：`CURRENT_TIME` 是 SQLite 关键字，
+/// 不加引号时 `SELECT current_time` 会被解析成「当前时间」常量（TEXT），
+/// 而不是列引用 —— 症状是读回来的值变成 `'07:16:23'` 这种时刻字符串。
 macro_rules! task_columns {
     () => {
         "id, input_path, output_path, template_id, template_name, actual_command, status, progress, \
-         total_duration, current_time, estimated_time_remaining, processing_speed, log_output, \
+         total_duration, \"current_time\", estimated_time_remaining, processing_speed, log_output, \
          error_message, created_at, started_at, completed_at, input_file_size, output_file_size, \
          batch_id, template_parameters, retry_of_task_id, output_path_resolved, overwrite_existing"
     };
@@ -107,7 +111,7 @@ macro_rules! task_columns {
 macro_rules! task_columns_lite {
     () => {
         "id, input_path, output_path, template_id, template_name, actual_command, status, progress, \
-         total_duration, current_time, estimated_time_remaining, processing_speed, \
+         total_duration, \"current_time\", estimated_time_remaining, processing_speed, \
          error_message, created_at, started_at, completed_at, input_file_size, output_file_size, \
          batch_id, template_parameters, retry_of_task_id, output_path_resolved, overwrite_existing"
     };
@@ -192,6 +196,34 @@ impl Store {
             .await
             .context("执行 schema.sql 失败")?;
         Ok(Self { pool })
+    }
+
+    // ─────────────────────────── 诊断 ───────────────────────────
+
+    /// 当前连接的日志模式（`PRAGMA journal_mode`；文件库应为 `wal`）
+    ///
+    /// 池里每条连接都用同一份连接选项建立，因此读哪条都一样。
+    pub async fn journal_mode(&self) -> anyhow::Result<String> {
+        let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(mode.to_lowercase())
+    }
+
+    /// 当前连接是否启用外键约束（`PRAGMA foreign_keys`）
+    pub async fn foreign_keys_enabled(&self) -> anyhow::Result<bool> {
+        let value: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(value != 0)
+    }
+
+    /// 当前连接的写锁等待上限，毫秒（`PRAGMA busy_timeout`）
+    pub async fn busy_timeout_ms(&self) -> anyhow::Result<i64> {
+        let value: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(value)
     }
 
     // ─────────────────────────── 设置 ───────────────────────────
@@ -446,7 +478,7 @@ impl Store {
     pub async fn update_task(&self, task: &ConversionTask) -> anyhow::Result<bool> {
         let sql = concat!(
             "UPDATE tasks SET input_path = ?, output_path = ?, template_id = ?, template_name = ?, \
-             actual_command = ?, status = ?, progress = ?, total_duration = ?, current_time = ?, \
+             actual_command = ?, status = ?, progress = ?, total_duration = ?, \"current_time\" = ?, \
              estimated_time_remaining = ?, processing_speed = ?, log_output = ?, error_message = ?, \
              created_at = ?, started_at = ?, completed_at = ?, input_file_size = ?, \
              output_file_size = ?, batch_id = ?, template_parameters = ?, retry_of_task_id = ?, \

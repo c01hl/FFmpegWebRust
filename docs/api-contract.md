@@ -36,18 +36,41 @@
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
 | GET | `/api/health` | — | `{"status":"ok","version","platform","ffmpeg","ffmpegResolved","ffprobe","ffprobeResolved"}` |
-| GET | `/api/system/status?force=false` | — | `AppStatusDto` |
+| GET | `/api/system/status?force=false` | — | `AppStatusDto`（含 `version`） |
 | GET | `/api/system/ffmpeg?force=false` | — | `FFmpegInfoDto`（含 `paths`） |
 | POST | `/api/system/ffmpeg/validate` | `{"path"}` | `{"valid":bool,"version":"…"}` |
-| GET | `/api/system/encoders?force=false` | — | `HardwareReportDto`（同步返回，首次可能耗时数十秒） |
+| GET | `/api/system/encoders?force=false` | — | `HardwareReportDto`（camelCase，见下；同步返回，首次可能耗时数十秒） |
 | GET | `/api/system/encoders/recommend?codec=h264&required=nvenc` | — | `{"encoder":"h264_nvenc"}` 或 `{"encoder":null,"reason":"…"}` |
 | GET | `/api/system/paths` | — | `{"dataDirectory","defaultOutputDirectory","databasePath","platform","isContainer","dataDirectoryWritable"}` |
 | GET | `/api/system/queue` | — | `{"queued","active","maxConcurrentTasks"}` |
+
+`HardwareReportDto`（`GET /api/system/encoders`）—— 服务端把执行层的
+`HardwareReport` 投影成 camelCase，字段名以本节为准：
+
+```jsonc
+{
+  "detectedAt": "2026-02-14T03:12:44.123Z", "ffmpegVersion": "9.0.2",
+  "ffmpegPath": "/opt/homebrew/bin/ffmpeg", "platform": "macOS",
+  "gpuSummary": "…", "summary": "检测到 3 个可用硬件编码器（…）",
+  "hwaccels": ["videotoolbox"], "supportedFilters": ["scale","subtitles",…],
+  "recommended": { "h264": "h264_videotoolbox", "hevc": "hevc_videotoolbox" },
+  "encoders": [{
+    "id": "h264_videotoolbox", "name": "h264_videotoolbox",
+    "displayName": "Apple VideoToolbox H.264", "type": "VideoToolbox",
+    "family": "videotoolbox", "codec": "h264",
+    "isAvailable": true, "supportsQualityOptions": true, "isHardware": true,
+    "lastCheckedAt": "2026-02-14T03:12:44.123Z", "unavailableReason": null,
+    "missingFromBuild": false, "ffmpegVersion": "9.0.2",
+    "verifiedByTrial": true, "trialCommand": "…"
+  }]
+}
+```
 
 `AppStatusDto`：
 
 ```jsonc
 {
+  "version": "0.1.0",
   "ffmpegAvailable": true, "ffmpegVersion": "9.0.2", "ffmpegPath": "/opt/homebrew/bin/ffmpeg",
   "ffprobePath": "/opt/homebrew/bin/ffprobe", "platform": "macOS",
   "dataDirectory": "/Users/me/Library/Application Support/FFmpegWebRust",
@@ -75,8 +98,8 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/templates?includeSystem=true&category=&q=` | 排序：推荐 → sortOrder → name；每项附 `available` + `unavailableReason` |
-| GET | `/api/templates/categories` | `[{"name":"视频转码","count":12},…]` |
+| GET | `/api/templates?includeSystem=true&category=&q=` | **裸数组**（不分页）：排序 推荐 → sortOrder → name；每项 = 模板字段 + `available` / `unavailableReason` / `missingFilters` / `inputFormatsDisplay` |
+| GET | `/api/templates/categories` | **裸数组** `[{"name":"视频转码","count":12},…]` |
 | GET | `/api/templates/{id}` | 单模板 |
 | POST | `/api/templates` | 创建用户模板；重名 → 409 |
 | PUT | `/api/templates/{id}` | 更新 |
@@ -86,8 +109,8 @@
 | POST | `/api/templates/{id}/test` | `{"parameterValues":{…}}` → `TemplateTestResult`（**同步**，最长约 30s） |
 | GET | `/api/templates/export?ids=a,b` | → `{"json":"…","fileName":"ffmpeg-templates.json"}` |
 | POST | `/api/templates/import` | `{"json":"…","asSystemTemplate":false}` → `{"imported":3,"skipped":1,"errors":[]}` |
-| POST | `/api/templates/system/reset` | → `{"presetVersion":4,"summary":"…"}` |
-| POST | `/api/templates/system/sync` | → `{"added":1,"updated":2,"unchanged":8,"presetVersion":4,"summary":"…"}` |
+| POST | `/api/templates/system/reset` | → `{"added":0,"updated":0,"unchanged":51,"removed":0,"presetVersion":4,"summary":"…"}` |
+| POST | `/api/templates/system/sync` | 同上形状（`added`/`updated`/`unchanged`/`removed`/`presetVersion`/`summary`） |
 
 模板对象 = `models::CommandTemplate` 的 camelCase 序列化结果。**唯一例外**：`type` 字段
 （`System`/`User`）在 API 中叫 `type`，在 Rust 里是 `r#type`。
@@ -121,10 +144,10 @@
 | --- | --- | --- |
 | POST | `/api/tasks/preview` | 命令预览 + 输出路径冲突解析（**关键端点**，前端不做任何本地推断） |
 | POST | `/api/tasks` | 创建任务 → `201 {"task":TaskDto,"enqueued":bool}` |
-| POST | `/api/tasks/{id}/start` | 入队；已终态 → 409 |
-| POST | `/api/tasks/{id}/cancel` | `{"graceful":false}` |
+| POST | `/api/tasks/{id}/start` | 入队；返回更新后的 `TaskDto`；已终态 → 409 |
+| POST | `/api/tasks/{id}/cancel` | body `{"graceful":false}`（可省略）→ 返回取消后的 `TaskDto` |
 | POST | `/api/tasks/{id}/retry` | 新建 + 入队 → `{"task":TaskDto}` |
-| GET | `/api/tasks?status=&batchId=&limit=&offset=` | `{"items":[TaskDto…],"total"}`（**不含** `logOutput`） |
+| GET | `/api/tasks?status=&batchId=&limit=&offset=` | `{"items":[TaskDto…],"total","limit","offset"}`（**不含** `logOutput`） |
 | GET | `/api/tasks/{id}` | `TaskDto`（含 `logOutput`） |
 | GET | `/api/tasks/{id}/log?tailLines=200` | `{"taskId","logOutput","maxLogLines"}` |
 | GET | `/api/tasks/running` | `[TaskDto…]` |
@@ -171,7 +194,7 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/batches` | `{"inputPaths":[…],"outputDirectory","templateId","parameterValues":{},"startImmediately":true}` → `{"batch":BatchDto,"tasks":[TaskDto…]}` |
-| GET | `/api/batches?limit=&offset=` | `{"items":[BatchDto…],"total"}` |
+| GET | `/api/batches?limit=&offset=` | `{"items":[BatchDto…],"total","limit","offset"}`（不带 `batchId` 时）；带 `batchId` 时同为该形状 |
 | GET | `/api/batches/{id}` | `BatchDto` |
 | GET | `/api/batches/{id}/tasks` | `[TaskDto…]`（按 createdAt 正序） |
 | POST | `/api/batches/{id}/cancel` | → `{"cancelled":3}` |

@@ -93,6 +93,29 @@ export const useToastStore = create<ToastState>((set, get) => ({
     if (!value) return id // 空白文本直接忽略（ToastService.cs 的行为）
 
     const duration = durationMs ?? TOAST_DURATIONS[level]
+
+    // 同文案 + 同级别的提示已经在屏幕上时：只「续期」，不再堆一条。
+    // 例如后端未启动时，AppShell / 首页 / 转换页会各自报一次同样的失败，
+    // 没有这条规则就会在右下角刷出一排一模一样的提示。
+    const existing = get().messages.find((message) => message.text === value && message.level === level)
+    if (existing) {
+      cancelTimer(existing.id)
+      set((state) => ({
+        messages: state.messages.map((message) =>
+          message.id === existing.id ? { ...message, durationMs: duration, createdAt: Date.now() } : message,
+        ),
+      }))
+      if (duration > 0) {
+        timers.set(
+          existing.id,
+          setTimeout(() => {
+            get().dismiss(existing.id)
+          }, duration),
+        )
+      }
+      return existing.id
+    }
+
     const message: ToastMessage = {
       id,
       text: value,

@@ -134,6 +134,8 @@ async fn main() -> anyhow::Result<()> {
     let printer = tokio::spawn(print_events(receiver));
     let convert = RunRequest::new(
         [
+            // `-re` 让输入按真实速率读取，这样 2 秒的素材能产生多个进度块，便于观察百分比
+            "-re",
             "-i",
             source_str.as_str(),
             "-c:v",
@@ -325,7 +327,12 @@ fn print_outcome(label: &str, outcome: &RunOutcome) {
         outcome.log_lines.len()
     );
     if !outcome.stderr_tail.trim().is_empty() {
-        println!("  stderr 尾部     : {}", outcome.stderr_tail.trim().replace('\n', " | "));
+        // 只展示尾部 3 行，避免刷屏（完整内容在 outcome.stderr_tail / log_lines 里）
+        let lines: Vec<&str> = outcome.stderr_tail.lines().filter(|l| !l.trim().is_empty()).collect();
+        let tail: Vec<&str> = lines.iter().rev().take(3).copied().collect();
+        for line in tail.iter().rev() {
+            println!("  stderr 尾部     : {}", line.trim());
+        }
     }
 }
 

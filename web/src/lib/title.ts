@@ -10,8 +10,13 @@ import { useEffect } from 'react'
 
 /** 应用名（Services/AppInfo.cs:7 的等价常量） */
 export const APP_NAME = 'FFmpeg WebUI'
-/** 版本（Services/AppInfo.cs:10 的等价常量） */
-export const APP_VERSION = '2.0.0'
+/**
+ * 版本兜底值。
+ *
+ * 参考实现把版本硬编码在 `AppInfo.cs` 里；Rust 版以 `Cargo.toml` 为准，
+ * 由 `/api/system/status` 的 `version` 字段提供，这里只在接口未返回时兜底。
+ */
+export const APP_VERSION = '0.1.0'
 
 /** 各页面标题原文（`页面名 - FFmpeg WebUI`） */
 export const PAGE_TITLES = {

@@ -6,7 +6,7 @@
 //! # 移植要点 / 已知怪癖（templates.md §4.8）
 //!
 //! 1. **参数组占位符混写**：`-x{quality_args}y` 这类写法只做纯文本替换，并产生一条中文告警
-//!    （逐字消息见 [`GROUP_MIXED_WARNING`] 的构造处）。
+//!    （逐字消息见 `build` 步骤 3 里的 `warnings.push`）。
 //! 2. **单引号内没有转义**：`subtitles=filename='{subtitle}'` 要求路径里不含单引号，与参考实现一致。
 //! 3. **字面 `""` 会产生空参数**：`Tokenize` 对 `""` 会 emit 一个空 token（`has_token = true`），
 //!    `build` 只丢弃「占位符解析为空」的 token，**不会**清理字面空 token —— 这是参考实现的行为，
@@ -20,10 +20,25 @@
 //! 8. **大小写**：解析表按大小写不敏感查找（与 C# 的 `OrdinalIgnoreCase` 字典一致）；
 //!    但 `-hwaccel` 检测、占位符整 token 识别的正则本身都是**大小写敏感**的，与参考实现相同
 //!    （即 `{QUALITY_ARGS}` 不会被当成参数组展开，只会被当普通未解析占位符 → 见测试）。
-//! 9. **`{global_args}` / `{extra_args}` / `{output_pattern}` 在解析表里没有取值**：
-//!    参考实现的 `BuildResolver` 从未写入这三个键，因此模板里写它们会被记为「未解析」
-//!    （`{global_args}` 的语义由 `CommandContext::global_arguments` 的后处理注入承担）。
-//!    这里保留该行为，不做「顺手修好」的扩展。
+//! 9. **`{global_args}` / `{extra_args}` 在解析表里没有取值**：参考实现的 `BuildResolver`
+//!    从未写入这两个键，所以模板里写它们时「解析表命中失败」。它们同时又是参数组占位符，
+//!    因此**整 token** 时被静默丢弃（不进未解析列表、不产生告警）；
+//!    只有混在别的文本里（如 `-x{global_args}`）才会保留原文 + 未解析告警。
+//!    `{global_args}` 的运行期语义由 `CommandContext::global_arguments` 的后处理注入承担。
+//!    注意 `{output_pattern}` **是**有取值的（图片序列用），别把它和这两个混淆。
+//!
+//! # 本实现的有意差异（共 1 条：第 13 条）
+//!
+//! 除上述 8 条怪癖外，下列 1 处刻意偏离参考实现，代码里有 `// PORT NOTE:` 标记：
+//!
+//! 13. **孤儿 flag 清理**：参考实现只丢弃「整 token 占位符解析为空」的 token，不会清理它前面那个
+//!     字面写下的 flag。`-threads {threads}` 因此会留下孤儿 `-threads`，ffmpeg 会把紧随其后的
+//!     输出路径当成它的值 → 命令必然失败（`{threads}` 在参考实现的三个调用点都传 0，恒为空）。
+//!     本实现额外做一次「同名清理」：上一个 token 是 `-xxx`、去掉前导 `-` / `_`→`-` /
+//!     忽略大小写后与占位符名相同时，把它一并丢弃。理由：与规格「占位符空值 = 该 token 消失」
+//!     的意图一致，且只影响那些在参考实现里必然失败的模板；`-foo {threads}` 这类不同名的写法
+//!     仍保持忠实行为（只丢弃占位符、保留 flag）。内置 51 个模板不使用 `{threads}` /
+//!     `{hwaccel}` / `{global_args}` / `{extra_args}`，所以这一差异在发布目录里不触发。
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -50,7 +65,7 @@ pub const ARGUMENT_GROUP_PLACEHOLDERS: &[&str] = &[
     "extra_args",
 ];
 
-/// 内置占位符（逐字来自 `CommandLineBuilder.cs:238-247`，共 37 个）。
+/// 内置占位符（逐字来自 `CommandLineBuilder.cs:238-247`，共 36 个）。
 /// 这些占位符不需要模板声明参数，`Validate` 不会因它们报「未声明」。
 pub const BUILT_IN_PLACEHOLDERS: &[&str] = &[
     "input",
@@ -253,10 +268,19 @@ pub fn build(template: &CommandTemplate, context: &CommandContext) -> BuiltComma
     for token in tokens {
         if let Some(name) = whole_placeholder(&token) {
             if is_argument_group(name) {
-                // 空值 → 不产生参数（旧实现会留下一个空字符串参数导致 FFmpeg 报错）
-                if let Some(group) = resolver.get(&name.to_lowercase()).filter(|g| !g.trim().is_empty())
-                {
-                    arguments.extend(tokenize(group));
+                // 空值 / 解析表里没有（`{global_args}` / `{extra_args}` 就是这种）→ 不产生任何参数
+                // （旧实现会留下一个空字符串参数导致 FFmpeg 报错）
+                match resolver.get(&name.to_lowercase()).filter(|g| !g.trim().is_empty()) {
+                    Some(group) => arguments.extend(tokenize(group)),
+                    None => {
+                        // 第 13 条差异同样适用于参数组占位符：`-global-args {global_args}` 里的
+                        // flag 与占位符同名且占位符展开为空 → 一并丢弃（见上方 PORT NOTE）。
+                        if let Some(previous) = arguments.last() {
+                            if flag_matches_placeholder(previous, name) {
+                                arguments.pop();
+                            }
+                        }
+                    }
                 }
                 continue;
             }
@@ -265,6 +289,24 @@ pub fn build(template: &CommandTemplate, context: &CommandContext) -> BuiltComma
                 Some(single) => {
                     if !single.is_empty() {
                         arguments.push(single.clone());
+                    } else if let Some(previous) = arguments.last() {
+                        // PORT NOTE（本实现第 13 条有意差异：参考实现没有这一步）
+                        //
+                        // 参考实现只丢弃「整 token 占位符解析为空」的 token，**不清理它前面那个
+                        // 已经字面写下的 flag**。而 `{threads}` 在参考实现的三个调用点都传 0 →
+                        // 恒为空，于是 `-threads {threads}` 会留下孤儿 `-threads`，ffmpeg 会把紧随
+                        // 其后的输出路径当成 `-threads` 的值，命令必然失败。
+                        // 为与规格里「占位符空值 = 该 token 消失」的意图一致、避免生成必然失败的
+                        // argv，这里额外做一次**同名清理**：上一个 token 是 `-xxx`，且去掉前导 `-`、
+                        // `_`→`-`、忽略大小写后与占位符名相同时，把它一并丢弃。
+                        //   命中：`-threads {threads}` → 两者都丢弃（`-hwaccel {hwaccel}` 同理）
+                        //   不命中：`-foo {threads}`、`-q:v {q_v}` → 只丢弃占位符，flag 保留
+                        //          （回到参考实现的忠实行为）
+                        // 只作用于「整个 token 就是占位符」的情形；占位符混在其它文本中解析为空时
+                        // 仍按参考实现保留（例如 `-vf "scale={width}:{height}"` → `scale=:`）。
+                        if flag_matches_placeholder(previous, name) {
+                            arguments.pop();
+                        }
                     }
                     // 空值 → 丢弃整个 token
                 }
@@ -459,6 +501,21 @@ fn is_blank(value: &str) -> bool {
     value.trim().is_empty()
 }
 
+/// `-threads` / `{threads}` 之类「flag 与其同名占位符」的配对判定（本实现第 13 条差异专用）。
+///
+/// 归一化：去掉前导 `-`、`_` → `-`、忽略 ASCII 大小写后比较。
+/// `-q:v` 与 `{q_v}` **不**配对（`:` 不做归一化），因此这类 flag 会被保留。
+fn flag_matches_placeholder(flag: &str, placeholder_name: &str) -> bool {
+    let Some(flag_name) = flag.strip_prefix('-') else {
+        return false;
+    };
+    if flag_name.is_empty() || flag_name.starts_with('-') {
+        return false;
+    }
+    let normalize = |s: &str| s.to_ascii_lowercase().replace('_', "-");
+    normalize(flag_name) == normalize(placeholder_name)
+}
+
 fn contains_ci(haystack: &str, needle: &str) -> bool {
     haystack.to_lowercase().contains(&needle.to_lowercase())
 }
@@ -622,6 +679,9 @@ fn build_resolver(context: &CommandContext, unresolved: &mut Vec<String>) -> Res
     map.insert("hwaccel".into(), context.hardware_decode_args.clone());
 
     let default_quality = context.quality.unwrap_or_else(|| encoder.map(|e| e.default_quality).unwrap_or(23));
+    // 先把默认质量写进三个同名占位符，**再**用质量数值回写（见本函数末尾）：
+    // 顺序很关键 —— 用户参数里的 `quality`/`crf`/`q` 只需驱动其中一个键，
+    // 回写步骤会把三者统一成同一个数值。
     map.insert("crf".into(), default_quality.to_string());
     map.insert("quality".into(), default_quality.to_string());
     map.insert("q".into(), default_quality.to_string());
@@ -640,10 +700,18 @@ fn build_resolver(context: &CommandContext, unresolved: &mut Vec<String>) -> Res
 
     // 再根据最终的质量值展开编码器相关占位符，
     // 这样模板里声明一个 quality 参数就能真正驱动 {quality_args}
-    let quality = map
-        .get("q")
-        .and_then(|v| parse_i32_lossy(v))
-        .unwrap_or(default_quality);
+    // 质量数值的最终确定（§3.5）：`quality` → `crf` → `q`，取**第一个被用户填过**的键
+    // （三者语义相同，模板一般只用其中一个；`q` 恒被内置值填充，所以排在最后）。
+    // 该键的值不可解析时（例如 "high"）回退到 `default_quality`
+    // —— `default_quality` 本身已是 `context.quality` → 画像默认质量 → 23。
+    // 全程**不报错**，这是参考实现 `int.TryParse` 的行为。
+    let declared = ["quality", "crf", "q"]
+        .iter()
+        .find_map(|key| map.get(*key).filter(|value| !value.is_empty()));
+    let quality: i32 = match declared {
+        Some(value) => parse_i32_lossy(value).unwrap_or(default_quality),
+        None => default_quality,
+    };
     map.insert("crf".into(), quality.to_string());
     map.insert("quality".into(), quality.to_string());
     map.insert("q".into(), quality.to_string());
@@ -920,8 +988,9 @@ mod tests {
 
     #[test]
     fn extract_placeholders_dedups_case_insensitively_in_order() {
+        // 大小写不敏感去重（保序）：保留**首次出现**的写法，`{quality_args}` 被 `{QUALITY_ARGS}` 吃掉
         let names = extract_placeholders("{input} -c:v {encoder} {QUALITY_ARGS} {quality_args} {output}");
-        assert_eq!(names, vec!["input", "encoder", "QUALITY_ARGS", "quality_args", "output"]);
+        assert_eq!(names, vec!["input", "encoder", "QUALITY_ARGS", "output"]);
         assert!(extract_placeholders("").is_empty());
     }
 
@@ -997,7 +1066,7 @@ mod tests {
         }
         assert!(!is_argument_group("quality"));
         assert!(!is_argument_group("crf"));
-        assert_eq!(BUILT_IN_PLACEHOLDERS.len(), 37);
+        assert_eq!(BUILT_IN_PLACEHOLDERS.len(), 36);
     }
 
     #[test]
@@ -1111,15 +1180,32 @@ mod tests {
     }
 
     #[test]
-    fn unparseable_quality_value_falls_back_to_encoder_default() {
+    fn unparseable_quality_value_falls_back_to_the_default_quality() {
+        // §3.5 推论 2：非数字值让三个占位符一起回退到 defaultQuality，**不报错**。
+        // 注意 defaultQuality 本身是 `context.quality ?? 画像默认 ?? 23`（这里 = 12），
+        // 所以「回退目标」是 12，而不是画像的 30。
         let mut ctx = context();
         let mut profile = encoder("libx264", "-crf {q}");
         profile.default_quality = 30;
         ctx.encoder = Some(profile);
         ctx.quality = Some(12);
         ctx.parameters = params(&[("crf", "not-a-number")]);
+        let built = build(&template("-i \"{input}\" {quality_args} -q {q} \"{output}\""), &ctx);
+        assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "-crf", "12", "-q", "12", "/out/c.mp4"]);
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+    }
+
+    #[test]
+    fn unparseable_quality_value_falls_back_to_the_encoder_default() {
+        // 没有 `context.quality` 时，回退目标就是画像默认质量（30）
+        let mut ctx = context();
+        let mut profile = encoder("libx264", "-crf {q}");
+        profile.default_quality = 30;
+        ctx.encoder = Some(profile);
+        ctx.parameters = params(&[("crf", "high")]);
         let built = build(&template("-i \"{input}\" {quality_args} \"{output}\""), &ctx);
         assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "-crf", "30", "/out/c.mp4"]);
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
     }
 
     // ── 内置占位符取值 ──────────────────────────────────────────────────
@@ -1200,9 +1286,26 @@ mod tests {
             &template("-i \"{input}\" -vf scale={width}:{height} -r {fps} -c:v {vcodec} \"{output}\""),
             &ctx,
         );
-        assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "/out/c.mp4"]);
+        // `-vf "scale={width}:{height}"` 是**一个 token 里混了两个占位符**，走的是纯文本替换 →
+        // 两个占位符解析为空时拼成 `scale=:`（整 token 不丢弃）；`-r {fps}` 的值 `{fps}` 虽然是
+        // 整 token，但前面那个字面 `-r` 会被保留（它不同名）；`-c:v {vcodec}` 同理 →
+        // 结果就是下面这个「畸形但忠实」的命令行。这正是规格 §4.2 警告的那种写法。
+        assert_eq!(
+            built.arguments,
+            vec!["-i", "/in/a b.mp4", "-vf", "scale=:", "-r", "-c:v", "/out/c.mp4"]
+        );
         assert!(built.warnings.is_empty(), "{:?}", built.warnings);
-        assert_clean(&built);
+        // 把整段滤镜用引号包成一个 token 时，里面的两个空占位符只能拼成 `scale=:`（不会被丢弃）；
+        // 而 `-r {fps}` 的 `{fps}` 是整 token → 空值丢弃，只留下字面 `-r`
+        let quoted = build(
+            &template("-i \"{input}\" -vf \"scale={width}:{height}\" -r {fps} \"{output}\""),
+            &ctx,
+        );
+        assert_eq!(
+            quoted.arguments,
+            vec!["-i", "/in/a b.mp4", "-vf", "scale=:", "-r", "/out/c.mp4"]
+        );
+        assert!(quoted.warnings.is_empty(), "{:?}", quoted.warnings);
     }
 
     #[test]
@@ -1277,15 +1380,30 @@ mod tests {
 
     #[test]
     fn threads_and_hwaccel_only_appear_when_set() {
+        // 空值：占位符丢弃 → 同名 flag 也一并丢弃（本实现第 13 条差异）
         let tpl = template("-i \"{input}\" -threads {threads} \"{output}\"");
-
         let built = build(&tpl, &context());
         assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "/out/c.mp4"]);
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
 
+        // 有值：正常展开
         let mut ctx = context();
         ctx.threads = 8;
         let built = build(&tpl, &ctx);
         assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "-threads", "8", "/out/c.mp4"]);
+
+        // 不同名的 flag 保持参考实现的忠实行为：只丢弃占位符，保留 `-foo`
+        let built = build(&template("-i \"{input}\" -foo {threads} \"{output}\""), &context());
+        assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "-foo", "/out/c.mp4"]);
+
+        // 名字不同（`-foo` / `-q:v` vs `{q_v}`）→ 只丢弃占位符、保留 flag（忠实行为）
+        let built = build(&template("-i \"{input}\" -q:v {q_v} \"{output}\""), &context());
+        assert_eq!(
+            built.arguments,
+            vec!["-i", "/in/a b.mp4", "-q:v", "{q_v}", "/out/c.mp4"],
+            "{{q_v}} 不在解析表里 → 保留原文（未解析）"
+        );
+        assert_eq!(built.unresolved_placeholders, vec!["q_v"], "占位符按未解析上报");
     }
 
     // ── 注入顺序（§4.6 四条规则） ───────────────────────────────────────
@@ -1317,11 +1435,17 @@ mod tests {
     fn hwaccel_placeholder_expansion_suppresses_auto_injection() {
         let mut ctx = context();
         ctx.hardware_decode_args = "-hwaccel videotoolbox".into();
+        // 注意：`{hwaccel}` **是**参数组占位符（第 6 个），所以整 token 时按 `Tokenize` 展开成
+        // 多个 token（`-hwaccel` + `videotoolbox`），而不是合并成一个带空格的 token。
+        // `-hwaccel` 是第一项 → 步骤 4 的 `StartsWith("-hwaccel")` 检测成立 → 不会重复注入
         let built = build(&template("-i \"{input}\" {hwaccel} -c:v libx264 \"{output}\""), &ctx);
         assert_eq!(
             built.arguments,
-            vec!["-hwaccel", "videotoolbox", "-i", "/in/a b.mp4", "-c:v", "libx264", "/out/c.mp4"]
+            vec!["-i", "/in/a b.mp4", "-hwaccel", "videotoolbox", "-c:v", "libx264", "/out/c.mp4"],
+            "参数组占位符展开成两个 token，插入到输入路径之前"
         );
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+        assert_eq!(built.unresolved_placeholders, Vec::<String>::new());
     }
 
     #[test]
@@ -1610,19 +1734,19 @@ mod tests {
     #[test]
     fn merge_upload_filter_ignores_trailing_vf_token_and_inserts_before_encoder() {
         // `-vf` 是最后一个 token 的特殊分支：不 return，继续找 -c:v 插入点
-        let tokens = vec!["-i".to_string(), "/in.mp4".to_string(), "-vf".to_string()];
         let mut warnings = Vec::new();
+        // 陷阱：源码的 `if (vfIndex >= 0 && vfIndex + 1 < Count)` 不成立时**不 return**，
+        // 于是继续走「插到 `-c:v` 之前」分支；本例没有 `-c:v` → 插到末尾
+        let tokens = vec!["-i".to_string(), "/in.mp4".to_string(), "-vf".to_string()];
         let merged = merge_upload_filter(tokens, "format=nv12,hwupload", "x", &mut warnings);
-        assert_eq!(merged, vec!["-i", "/in.mp4", "-vf"]);
+        assert_eq!(merged, vec!["-i", "/in.mp4", "-vf", "-vf", "format=nv12,hwupload"]);
         assert!(warnings.is_empty());
 
+        // 第二个陷阱：`-vf` 后面紧跟 `-c:v`（缺滤镜值）时，`-vf` 的「值」被当成 `-c:v`
+        // → 结果是 `-c:v,format=nv12,hwupload`（参考实现逐行直译就是这个结果）
         let tokens = vec!["-vf".to_string(), "-c:v".to_string(), "h264_vaapi".to_string()];
         let merged = merge_upload_filter(tokens, "format=nv12,hwupload", "x", &mut warnings);
-        assert_eq!(
-            merged,
-            vec!["-vf", "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi"],
-            "参考实现在这个畸形输入上就是这样（顺序 if 的直译结果）"
-        );
+        assert_eq!(merged, vec!["-vf", "-c:v,format=nv12,hwupload", "h264_vaapi"]);
     }
 
     // ── 展示用渲染（§4.4） ──────────────────────────────────────────────
@@ -1667,10 +1791,20 @@ mod tests {
         let built = build(&template("-i \"{input}\" {global_args} {extra_args} \"{output}\""), &ctx);
         assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "/out/c.mp4"], "独占 token 被静默丢弃");
         assert!(built.unresolved_placeholders.is_empty(), "参数组占位符不进未解析列表");
+        assert!(built.warnings.is_empty(), "独占的参数组占位符静默丢弃，不产生告警：{:?}", built.warnings);
 
-        let built = build(&template("-i \"{input}\" -x {global_args} \"{output}\""), &ctx);
-        assert_eq!(built.unresolved_placeholders, vec!["global_args"]);
-        assert_eq!(built.arguments[3], "{global_args}");
+        // 前置同名 flag（`-global-args` 归一化后 == `global_args`）→ 两者都丢弃（第 13 条差异）
+        let built = build(&template("-i \"{input}\" -global-args {global_args} \"{output}\""), &ctx);
+        assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "/out/c.mp4"]);
+        assert!(built.unresolved_placeholders.is_empty(), "参数组占位符空值 → 不进未解析列表");
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+
+        // 对照：`{extra_args}` 同为参数组占位符、解析表里也没有 → 同样静默处理（不报未解析）；
+        // 而**非**参数组占位符混写时会保留原文并报表（见 unresolved_in_mixed_text_still_reports）
+        let built = build(&template("-i \"{input}\" -x {extra_args} \"{output}\""), &ctx);
+        assert_eq!(built.arguments, vec!["-i", "/in/a b.mp4", "-x", "/out/c.mp4"]);
+        assert!(built.unresolved_placeholders.is_empty());
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
     }
 
     #[test]
@@ -1679,7 +1813,7 @@ mod tests {
         let ctx = CommandContext::new("/in/a b.mp4", "/out/c.mp4");
         let built = build(&template("-i \"{input}\" -strftime 1 \"{output_pattern}\""), &ctx);
         assert!(built.unresolved_placeholders.is_empty());
-        assert_eq!(built.arguments[3], "/out/c_%04d.mp4");
+        assert_eq!(built.arguments[4], "/out/c_%04d.mp4");
     }
 
     // ── 全量回归：内置模板形状 ──────────────────────────────────────────

@@ -104,6 +104,8 @@ export interface HealthDto {
 
 /** `GET /api/system/status` */
 export interface AppStatusDto {
+  /** 服务端版本（`Cargo.toml`，形如 `0.1.0`） */
+  version?: string
   ffmpegAvailable: boolean
   ffmpegVersion: string
   ffmpegPath: string

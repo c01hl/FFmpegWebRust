@@ -175,11 +175,14 @@ export function formatDateTimeMinute(value: string | number | Date | null | unde
   )
 }
 
-/** 硬件检测耗时：`< 60 秒 → "3.4 秒"`；`>= 60 秒 → "1:12"` */
+/** 硬件检测耗时：`< 60 秒 → "3.4 秒"`；`>= 60 秒 → "1:12"`（**分钟不补零**的 m:ss） */
 export function formatDetectionDuration(seconds: number | null | undefined): string {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return EMPTY_VALUE
   if (seconds < 60) return `${seconds.toFixed(1)} 秒`
-  return formatDuration(seconds)
+  const total = Math.floor(seconds)
+  const minutes = Math.floor(total / 60)
+  const secs = total % 60
+  return `${minutes}:${String(secs).padStart(2, '0')}`
 }
 
 /** 模板试运行耗时（后端给的是毫秒）：`<= 0 → "—"`；否则 `"2.1 秒"` */

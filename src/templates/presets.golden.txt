@@ -1,0 +1,374 @@
+# 内置模板预设 golden 目录（逐字移植自 SystemTemplatePresets.cs，规格 docs/reference/templates.md §11）
+# 重新生成：UPDATE_PRESETS_GOLDEN=1 cargo test templates::presets::tests::golden_catalog
+# 不含时间戳（created_at/updated_at 每次构造都不同）；id 由稳定 key 派生，因此可以纳入比对。
+preset_version=4
+categories=推荐|视频转码|硬件加速|视频压缩|分辨率与画面|音频处理|特殊处理
+count=51
+---
+[00] key=rec.mp4_h264_auto id=b3dac574c7563d160e767de8 sort_order=0 category=推荐 type=System name=MP4 · H.264（自动选择最佳编码器）
+  flags=recommended:true output_extension=mp4 target_codec=h264 hardware_mode=Auto required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[mp4, h264, 通用, 硬件加速]
+  description=输出兼容性最好的 H.264 MP4。会自动使用本机可用的硬件编码器（NVENC / Quick Sync / AMF / VideoToolbox / VA-API），没有硬件时回退到 x264。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -map 0:v:0 -map 0:a? -c:a {audio_encoder} -b:a {audio_bitrate} -movflags +faststart -pix_fmt yuv420p "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=数值越小画质越好、文件越大。留空则由当前编码器的最佳默认值决定。 | options=[""→"自动（推荐）", "18"→"高画质", "23"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[01] key=rec.mp4_hevc_auto id=eb640eaa746e19f39917642a sort_order=1 category=推荐 type=System name=MP4 · H.265 / HEVC（自动选择最佳编码器）
+  flags=recommended:true output_extension=mp4 target_codec=hevc hardware_mode=Auto required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[mp4, hevc, 压缩, 硬件加速]
+  description=同等画质下体积比 H.264 小约 40%。会自动使用本机可用的硬件编码器，没有硬件时回退到 x265。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -map 0:v:0 -map 0:a? -c:a {audio_encoder} -b:a {audio_bitrate} -tag:v hvc1 -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=数值越小画质越好、文件越大。留空则由当前编码器的最佳默认值决定。 | options=[""→"自动（推荐）", "18"→"高画质", "23"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[02] key=rec.audio_mp3 id=44258cb0d66260385cdfa5ba sort_order=2 category=推荐 type=System name=音频 · 提取为 MP3
+  flags=recommended:true output_extension=mp3 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, avi, mov, webm, flv, ts, wav, flac, m4a, aac, ogg, wmv] required_filters=[] tags=[mp3, 音频, 提取]
+  description=从视频或音频中提取音轨并转成通用性最好的 MP3。
+  command_args=-i "{input}" -vn -map 0:a:0 -c:a libmp3lame -b:a {audio_bitrate} "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+---
+[03] key=rec.fast_remux id=4ebf4e1720d3f3d07c59b371 sort_order=3 category=推荐 type=System name=快速换容器（不改画质，秒完成）
+  flags=recommended:true output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[封装, 无损, 快速]
+  description=只重新封装容器，不重新编码，速度极快、画质完全无损。仅当目标容器支持源编码格式时可用。
+  command_args=-i "{input}" -map 0 -c copy -movflags +faststart "{output}"
+---
+[04] key=video.mp4_x264 id=d3963154346c3deff760e532 sort_order=4 category=视频转码 type=System name=转换为 MP4（H.264 软件编码 x264)
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[avi, mkv, mov, wmv, flv, webm, ts, mpg, m4v, 3gp] required_filters=[] tags=[mp4, h264, 软件编码]
+  description=使用 CPU 软件编码，画质与体积控制最精细，兼容所有平台。
+  command_args=-i "{input}" -c:v libx264 -crf {quality} -preset {preset} -c:a aac -b:a {audio_bitrate} -movflags +faststart -pix_fmt yuv420p "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param preset | label=编码速度 | kind=Select | default=medium | min=- | max=- | true_value=1 | false_value= | description=越慢压缩率越高（体积更小）。 | options=["veryfast"→"很快", "fast"→"快", "medium"→"中等（推荐）", "slow"→"慢 · 更小", "veryslow"→"很慢 · 最小"]
+  param quality | label=CRF 质量 | kind=Select | default=23 | min=- | max=- | true_value=1 | false_value= | description=18 接近无损，23 为默认均衡值，28 体积明显更小。 | options=["18"→"18 · 高画质", "23"→"23 · 均衡", "28"→"28 · 小体积"]
+---
+[05] key=video.mkv_x265 id=5c10f8696b8d4bd3213838a8 sort_order=5 category=视频转码 type=System name=转换为 MKV（H.265 软件编码 x265)
+  flags=recommended:false output_extension=mkv target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[mkv, hevc, 归档]
+  description=MKV 容器 + x265 软件编码，适合本地归档保存。
+  command_args=-i "{input}" -c:v libx265 -crf {quality} -preset {preset} -c:a aac -b:a {audio_bitrate} "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param preset | label=编码速度 | kind=Select | default=medium | min=- | max=- | true_value=1 | false_value= | description= | options=["veryfast"→"很快", "medium"→"中等（推荐）", "slow"→"慢 · 更小"]
+  param quality | label=CRF 质量 | kind=Select | default=28 | min=- | max=- | true_value=1 | false_value= | description=x265 的 CRF 通常比 x264 高 3~5。 | options=["22"→"22 · 高画质", "28"→"28 · 均衡", "33"→"33 · 小体积"]
+---
+[06] key=video.webm_vp9 id=101286f52cfec52e642867d2 sort_order=6 category=视频转码 type=System name=转换为 WebM（VP9 + Opus）
+  flags=recommended:false output_extension=webm target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[webm, vp9]
+  description=开源免专利格式，适合网页嵌入。
+  command_args=-i "{input}" -c:v libvpx-vp9 -crf {quality} -b:v 0 -row-mt 1 -c:a libopus -b:a {audio_bitrate} "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=CRF 质量 | kind=Select | default=32 | min=- | max=- | true_value=1 | false_value= | description= | options=["24"→"24 · 高画质", "32"→"32 · 均衡", "40"→"40 · 小体积"]
+---
+[07] key=video.av1_svt id=92f743f1c16dfb0a62c1df8e sort_order=7 category=视频转码 type=System name=转换为 AV1（SVT-AV1，体积最小)
+  flags=recommended:false output_extension=mp4 target_codec=av1 hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[av1, mp4, 压缩]
+  description=压缩率最高的开放格式，编码速度较慢但体积最小。需要 FFmpeg 编译了 libsvtav1。
+  command_args=-i "{input}" -c:v libsvtav1 -crf {quality} -preset {preset} -c:a aac -b:a {audio_bitrate} -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param preset | label=编码速度 | kind=Select | default=8 | min=- | max=- | true_value=1 | false_value= | description=数字越大越快、压缩率越低。 | options=["4"→"4 · 最慢/最小", "8"→"8 · 均衡（推荐）", "12"→"12 · 快"]
+  param quality | label=CRF 质量 | kind=Select | default=32 | min=- | max=- | true_value=1 | false_value= | description= | options=["24"→"24 · 高画质", "32"→"32 · 均衡", "40"→"40 · 小体积"]
+---
+[08] key=video.mov_prores id=b64d60b0e701b7e4ccf057f1 sort_order=8 category=视频转码 type=System name=转换为 MOV（ProRes 422，剪辑友好）
+  flags=recommended:false output_extension=mov target_codec=prores hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[mov, prores, 剪辑]
+  description=生成适合 Final Cut / Premiere 剪辑的中间码率素材，体积较大。
+  command_args=-i "{input}" -c:v prores_ks -profile:v 3 -vendor apl0 -pix_fmt yuv422p10le -c:a pcm_s16le "{output}"
+---
+[09] key=video.gif id=bff1475392df389d3e91021b sort_order=9 category=视频转码 type=System name=转换为 GIF 动图
+  flags=recommended:false output_extension=gif target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[gif, 动图]
+  description=生成高质量调色板的 GIF，默认限制在 480 宽、12fps。
+  command_args=-i "{input}" -vf "fps={fps},scale={width}:-2:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop 0 "{output}"
+  param fps | label=帧率 | kind=Select | default=12 | min=- | max=- | true_value=1 | false_value= | description= | options=["8"→"8 fps · 最小", "12"→"12 fps · 推荐", "15"→"15 fps", "25"→"25 fps · 最流畅"]
+  param width | label=宽度 | kind=Select | default=480 | min=- | max=- | true_value=1 | false_value= | description=高度按比例自动计算且保证为偶数。 | options=["320"→"320 px", "480"→"480 px", "640"→"640 px", "800"→"800 px"]
+---
+[10] key=hw.h264_auto id=55d4851fc7a9ed5a1b2d7a6b sort_order=10 category=硬件加速 type=System name=硬件加速 · H.264（自动挑选可用编码器）
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=Auto required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[硬件加速, h264]
+  description=自动使用本机最合适的 H.264 硬件编码器；模板会带上对应编码器的正确质量参数。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=数值越小画质越好、文件越大。留空则由当前编码器的最佳默认值决定。 | options=[""→"自动（推荐）", "18"→"高画质", "23"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[11] key=hw.hevc_auto id=5ffaa0870a37528149881ff7 sort_order=11 category=硬件加速 type=System name=硬件加速 · H.265（自动挑选可用编码器）
+  flags=recommended:false output_extension=mp4 target_codec=hevc hardware_mode=Auto required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[硬件加速, hevc]
+  description=自动使用本机最合适的 H.265 硬件编码器，画质/体积比优于 H.264。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -tag:v hvc1 -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=数值越小画质越好、文件越大。留空则由当前编码器的最佳默认值决定。 | options=[""→"自动（推荐）", "18"→"高画质", "23"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[12] key=hw.nvenc.h264 id=0b10dbf2c225c163c028f248 sort_order=12 category=硬件加速 type=System name=NVIDIA NVENC · H.264
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=Required required_encoder=nvenc requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, h264, nvenc]
+  description=使用 NVIDIA 显卡 的 NVIDIA NVENC 硬件编码 H.264，速度快、CPU 占用低。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[13] key=hw.nvenc.hevc id=57688753ac779d0465ffcefd sort_order=13 category=硬件加速 type=System name=NVIDIA NVENC · H.265 / HEVC
+  flags=recommended:false output_extension=mp4 target_codec=hevc hardware_mode=Required required_encoder=nvenc requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, hevc, nvenc]
+  description=使用 NVIDIA 显卡 的 NVIDIA NVENC 硬件编码 H.265，画质/体积比更好。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -tag:v hvc1 -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[14] key=hw.qsv.h264 id=db6a54c415fb4b68ca8adcaf sort_order=14 category=硬件加速 type=System name=Intel Quick Sync · H.264
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=Required required_encoder=qsv requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, h264, qsv]
+  description=使用 Intel 核显 / 独显 的 Intel Quick Sync 硬件编码 H.264，速度快、CPU 占用低。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[15] key=hw.qsv.hevc id=270ccda99c399463dabf0b46 sort_order=15 category=硬件加速 type=System name=Intel Quick Sync · H.265 / HEVC
+  flags=recommended:false output_extension=mp4 target_codec=hevc hardware_mode=Required required_encoder=qsv requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, hevc, qsv]
+  description=使用 Intel 核显 / 独显 的 Intel Quick Sync 硬件编码 H.265，画质/体积比更好。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -tag:v hvc1 -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[16] key=hw.amf.h264 id=2d59550dbcd0dd544c74250d sort_order=16 category=硬件加速 type=System name=AMD AMF · H.264
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=Required required_encoder=amf requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, h264, amf]
+  description=使用 AMD 显卡 的 AMD AMF 硬件编码 H.264，速度快、CPU 占用低。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[17] key=hw.amf.hevc id=d8ecb2cee772917cb28eb0a0 sort_order=17 category=硬件加速 type=System name=AMD AMF · H.265 / HEVC
+  flags=recommended:false output_extension=mp4 target_codec=hevc hardware_mode=Required required_encoder=amf requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, hevc, amf]
+  description=使用 AMD 显卡 的 AMD AMF 硬件编码 H.265，画质/体积比更好。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -tag:v hvc1 -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[18] key=hw.videotoolbox.h264 id=61602614755ec2fd1c084323 sort_order=18 category=硬件加速 type=System name=Apple VideoToolbox · H.264
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=Required required_encoder=videotoolbox requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, h264, videotoolbox]
+  description=使用 Apple Silicon / macOS 的 Apple VideoToolbox 硬件编码 H.264，速度快、CPU 占用低。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[19] key=hw.videotoolbox.hevc id=2cc05ebe72ea210edba18bd8 sort_order=19 category=硬件加速 type=System name=Apple VideoToolbox · H.265 / HEVC
+  flags=recommended:false output_extension=mp4 target_codec=hevc hardware_mode=Required required_encoder=videotoolbox requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, hevc, videotoolbox]
+  description=使用 Apple Silicon / macOS 的 Apple VideoToolbox 硬件编码 H.265，画质/体积比更好。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -tag:v hvc1 -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[20] key=hw.vaapi.h264 id=d9049d4d53d36de750c87279 sort_order=20 category=硬件加速 type=System name=Linux VA-API · H.264
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=Required required_encoder=vaapi requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, h264, vaapi]
+  description=使用 Linux 下的 Intel / AMD 显卡 的 Linux VA-API 硬件编码 H.264，速度快、CPU 占用低。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[21] key=hw.vaapi.hevc id=a790da47c113c27dde57ee24 sort_order=21 category=硬件加速 type=System name=Linux VA-API · H.265 / HEVC
+  flags=recommended:false output_extension=mp4 target_codec=hevc hardware_mode=Required required_encoder=vaapi requires_hardware_acceleration=true
+  input_formats=[] required_filters=[] tags=[硬件加速, hevc, vaapi]
+  description=使用 Linux 下的 Intel / AMD 显卡 的 Linux VA-API 硬件编码 H.265，画质/体积比更好。
+  command_args=-i "{input}" -c:v {encoder} {quality_args} {preset_args} {hwupload_args} -c:a {audio_encoder} -b:a {audio_bitrate} -tag:v hvc1 -movflags +faststart "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+  param quality | label=质量 | kind=Select | default= | min=- | max=- | true_value=1 | false_value= | description=留空使用该编码器的推荐默认值。 | options=[""→"自动（推荐）", "20"→"高画质", "24"→"均衡", "28"→"小体积", "32"→"极小体积"]
+---
+[22] key=compress.crf18 id=d753ae929dc1adc36fe68f77 sort_order=22 category=视频压缩 type=System name=压缩 · 高画质（CRF 18)
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[压缩]
+  description=肉眼几乎无损失，体积约为原文件的一半。
+  command_args=-i "{input}" -c:v libx264 -crf 18 -preset slow -c:a aac -b:a 192k -movflags +faststart "{output}"
+---
+[23] key=compress.crf23 id=7d1d04f707542e7b1433a440 sort_order=23 category=视频压缩 type=System name=压缩 · 均衡（CRF 23)
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[压缩]
+  description=在画质和体积之间取得平衡，适合大多数场景。
+  command_args=-i "{input}" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k -movflags +faststart "{output}"
+---
+[24] key=compress.crf28 id=44741deccc28b95292789b4b sort_order=24 category=视频压缩 type=System name=压缩 · 小体积（CRF 28)
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[压缩]
+  description=明显缩小体积，适合手机观看或分享。
+  command_args=-i "{input}" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 96k -movflags +faststart "{output}"
+---
+[25] key=compress.max_size id=ee1d2341fed6e48a1edd8d49 sort_order=25 category=视频压缩 type=System name=压缩 · 限制文件大小
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[压缩, 体积限制]
+  description=按目标体积限制输出文件大小，适合有上传大小限制的场景。
+  command_args=-i "{input}" -c:v libx264 -preset fast -crf 26 -maxrate {maxrate} -bufsize {bufsize} -fs {maxsize}M -c:a aac -b:a 96k -movflags +faststart "{output}"
+  param bufsize | label=缓冲区 | kind=Select | default=3000k | min=- | max=- | true_value=1 | false_value= | description= | options=["1600k"→"1600 kbps", "3000k"→"3000 kbps", "6000k"→"6000 kbps", "12000k"→"12000 kbps"]
+  param maxrate | label=最大码率 | kind=Select | default=1500k | min=- | max=- | true_value=1 | false_value= | description= | options=["800k"→"800 kbps", "1500k"→"1500 kbps", "3000k"→"3000 kbps", "6000k"→"6000 kbps"]
+  param maxsize | label=目标大小 (MB) | kind=Number | default=50 | min=1 | max=100000 | true_value=1 | false_value= | description=达到该大小后 FFmpeg 会停止写入。 | options=[]
+---
+[26] key=scale.3840x2160 id=dbdbb955cb35759b1fd309eb sort_order=26 category=分辨率与画面 type=System name=调整为 4K（3840×2160）
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[缩放, 2160p]
+  description=等比缩放到不超过 3840×2160，必要时用黑边补齐，保证画面不变形。
+  command_args=-i "{input}" -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k -movflags +faststart "{output}"
+---
+[27] key=scale.1920x1080 id=f574c85595497c0a6af59cf3 sort_order=27 category=分辨率与画面 type=System name=调整为 1080p（1920×1080）
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[缩放, 1080p]
+  description=等比缩放到不超过 1920×1080，必要时用黑边补齐，保证画面不变形。
+  command_args=-i "{input}" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k -movflags +faststart "{output}"
+---
+[28] key=scale.1280x720 id=50d07da7fd6e89835b327b29 sort_order=28 category=分辨率与画面 type=System name=调整为 720p（1280×720）
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[缩放, 720p]
+  description=等比缩放到不超过 1280×720，必要时用黑边补齐，保证画面不变形。
+  command_args=-i "{input}" -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k -movflags +faststart "{output}"
+---
+[29] key=scale.854x480 id=17c4e87cd915e47991d0e6c1 sort_order=29 category=分辨率与画面 type=System name=调整为 480p（854×480）
+  flags=recommended:false output_extension=mp4 target_codec=h264 hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[缩放, 480p]
+  description=等比缩放到不超过 854×480，必要时用黑边补齐，保证画面不变形。
+  command_args=-i "{input}" -vf "scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2,setsar=1" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k -movflags +faststart "{output}"
+---
+[30] key=scale.width id=184ad6914fa7e90fc6f75c39 sort_order=30 category=分辨率与画面 type=System name=缩放 · 指定宽度（高度自适应）
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[缩放]
+  description=只指定宽度，高度按原始比例自动计算，并保证为偶数。
+  command_args=-i "{input}" -vf "scale={width}:-2:flags=lanczos" -c:v libx264 -crf 23 -c:a aac -b:a 128k -movflags +faststart "{output}"
+  param width | label=目标宽度 (px) | kind=Select | default=1280 | min=- | max=- | true_value=1 | false_value= | description= | options=["640"→"640", "854"→"854", "1280"→"1280", "1920"→"1920", "2560"→"2560", "3840"→"3840"]
+---
+[31] key=crop.vertical_9x16 id=93f90fef5a845423206b47a8 sort_order=31 category=分辨率与画面 type=System name=裁剪 · 竖屏 9:16（1080×1920）
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[竖屏, 裁剪]
+  description=居中裁剪为竖屏短视频比例，适合抖音 / 视频号 / Shorts。
+  command_args=-i "{input}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" -c:v libx264 -crf 23 -c:a aac -b:a 128k -movflags +faststart "{output}"
+---
+[32] key=rotate.90 id=47912dee36bbe86205b5a142 sort_order=32 category=分辨率与画面 type=System name=旋转 · 顺时针 90°
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[旋转]
+  description=把横屏视频旋转为竖屏（或反过来）。
+  command_args=-i "{input}" -vf "transpose=1" -c:v libx264 -crf 23 -c:a aac -b:a 128k -movflags +faststart "{output}"
+  param angle | label=方向 | kind=Select | default=1 | min=- | max=- | true_value=1 | false_value= | description=对应 FFmpeg transpose 参数。 | options=["1"→"顺时针 90°", "2"→"逆时针 90°"]
+---
+[33] key=speed.change id=fe59a4c05e8cbf3d09504987 sort_order=33 category=分辨率与画面 type=System name=变速 · 修改播放速度
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[变速]
+  description=通过调整时间戳实现无音调变化的变速（视频不变调，音频会被重采样）。
+  command_args=-i "{input}" -filter_complex "[0:v]setpts=PTS/{speed}[v];[0:a]atempo={atempo}[a]" -map "[v]" -map "[a]" -c:v libx264 -crf 23 -c:a aac -b:a 128k "{output}"
+  param atempo | label=音频同步倍率 | kind=Select | default=2 | min=- | max=- | true_value=1 | false_value= | description=需要与速度倍率一致，音频允许的范围是 0.5~100。 | options=["0.5"→"0.5×", "1.5"→"1.5×", "2"→"2×", "4"→"4×"]
+  param speed | label=速度倍率 | kind=Select | default=2 | min=- | max=- | true_value=1 | false_value= | description=大于 1 变快，小于 1 变慢。 | options=["0.5"→"0.5× 慢放", "1.5"→"1.5×", "2"→"2× 快放", "4"→"4×"]
+---
+[34] key=deinterlace.yadif id=4e8dc4f18ec5000c3891f9c2 sort_order=34 category=分辨率与画面 type=System name=去隔行 · 消除交错的横纹
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[去隔行, 老视频]
+  description=对老式摄像机/电视录制的隔行视频做反交错处理。
+  command_args=-i "{input}" -vf "yadif=1:-1:0" -c:v libx264 -crf 20 -preset medium -c:a aac -b:a 128k -movflags +faststart "{output}"
+---
+[35] key=audio.aac_m4a id=1c415d57ed6e0766448e38b5 sort_order=35 category=音频处理 type=System name=音频 · 提取为 AAC / M4A
+  flags=recommended:false output_extension=m4a target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, avi, mov, webm, flv, ts, wav, flac, m4a, aac, ogg, wmv] required_filters=[] tags=[音频, aac]
+  description=提取音轨并转为 AAC，体积小、兼容性好。
+  command_args=-i "{input}" -vn -map 0:a:0 -c:a aac -b:a {audio_bitrate} "{output}"
+  param audio_bitrate | label=音频码率 | kind=Select | default=128k | min=- | max=- | true_value=1 | false_value= | description= | options=["96k"→"96 kbps", "128k"→"128 kbps", "192k"→"192 kbps", "256k"→"256 kbps"]
+---
+[36] key=audio.flac id=f728a72dad668d339ed7bac2 sort_order=36 category=音频处理 type=System name=音频 · 提取为 FLAC（无损）
+  flags=recommended:false output_extension=flac target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, avi, mov, webm, flv, ts, wav, m4a, aac, ogg, wmv] required_filters=[] tags=[音频, 无损]
+  description=无损提取音轨，不损失任何音质。
+  command_args=-i "{input}" -vn -map 0:a:0 -c:a flac -compression_level 8 "{output}"
+---
+[37] key=audio.wav id=2f97f5e90dbceaade3639041 sort_order=37 category=音频处理 type=System name=音频 · 提取为 WAV（PCM 无损）
+  flags=recommended:false output_extension=wav target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, avi, mov, webm, flv, ts, flac, m4a, aac, ogg, wmv] required_filters=[] tags=[音频, wav, 无损]
+  description=未压缩 PCM，适合后续在音频软件里继续处理。
+  command_args=-i "{input}" -vn -map 0:a:0 -c:a pcm_s16le -ar 48000 "{output}"
+---
+[38] key=audio.opus id=e125e65436fb127796feb451 sort_order=38 category=音频处理 type=System name=音频 · 提取为 Opus
+  flags=recommended:false output_extension=opus target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, avi, mov, webm, flv, ts, wav, flac, m4a, aac, ogg] required_filters=[] tags=[音频, opus]
+  description=同码率下音质优于 MP3/AAC，适合网络传输。
+  command_args=-i "{input}" -vn -map 0:a:0 -c:a libopus -b:a 128k -vbr on "{output}"
+---
+[39] key=audio.loudnorm id=16df0c7d1158d703164619de sort_order=39 category=音频处理 type=System name=音频 · 音量标准化（EBU R128）
+  flags=recommended:false output_extension=m4a target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, avi, mov, webm, flv, ts, wav, flac, m4a, aac, ogg, mp3] required_filters=[] tags=[音频, 响度]
+  description=把整体响度标准化到 -16 LUFS，避免忽大忽小。
+  command_args=-i "{input}" -vn -af "loudnorm=I=-16:TP=-1.5:LRA=11" -c:a aac -b:a 192k "{output}"
+---
+[40] key=audio.remove_track id=07966e0c06cc0185c34c84e2 sort_order=40 category=音频处理 type=System name=视频 · 移除音轨（静音视频）
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[静音, 去音轨]
+  description=彻底去掉音频流，只保留画面。
+  command_args=-i "{input}" -an -c:v copy "{output}"
+---
+[41] key=special.watermark_image id=f0d3a8605323c57d5d232302 sort_order=41 category=特殊处理 type=System name=画面 · 添加图片水印
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[水印, 叠加]
+  description=在右下角叠加一张 PNG/JPG 水印，可通过参数调整位置与透明度。
+  command_args=-i "{input}" -i "{watermark}" -filter_complex "[1:v]format=rgba,colorchannelmixer=aa={opacity}[wm];[0:v][wm]overlay={position}" -c:v libx264 -crf 23 -preset medium -c:a copy "{output}"
+  param opacity | label=不透明度 | kind=Select | default=1 | min=- | max=- | true_value=1 | false_value= | description= | options=["0.3"→"30%", "0.5"→"50%", "0.8"→"80%", "1"→"不透明"]
+  param position | label=水印位置 | kind=Select | default=W-w-20:H-h-20 | min=- | max=- | true_value=1 | false_value= | description= | options=["W-w-20:H-h-20"→"右下角", "20:20"→"左上角", "W-w-20:20"→"右上角", "20:H-h-20"→"左下角", "(W-w)/2:(H-h)/2"→"居中"]
+  param watermark | label=水印图片路径 | kind=Text | default= | min=- | max=- | true_value=1 | false_value= | description=填写 PNG/JPG 的完整路径。 | options=[]
+---
+[42] key=special.burn_subtitles id=268af611f8edb3b68bf5647f sort_order=42 category=特殊处理 type=System name=画面 · 烧录字幕（硬字幕）
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[subtitles] tags=[字幕, 硬字幕]
+  description=把字幕永久烧进画面，任何播放器都能显示。支持 srt/ass。需要 FFmpeg 编译时启用 libass（Homebrew / winget / gyan.dev 的完整构建都有，部分精简构建没有）。
+  command_args=-i "{input}" -vf "subtitles=filename='{subtitle}':force_style='FontSize={fontsize}'" -c:v libx264 -crf 23 -preset medium -c:a copy "{output}"
+  param fontsize | label=字号 | kind=Select | default=24 | min=- | max=- | true_value=1 | false_value= | description= | options=["16"→"小", "24"→"中", "32"→"大", "40"→"特大"]
+  param subtitle | label=字幕文件路径 | kind=Text | default= | min=- | max=- | true_value=1 | false_value= | description=srt / ass 文件的完整路径。路径中不要包含单引号。 | options=[]
+---
+[43] key=special.trim_segment id=b3f8439b93a11fb5046e89a1 sort_order=43 category=特殊处理 type=System name=画面 · 按时间裁剪片段
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[裁剪, 剪辑]
+  description=截取视频中的一段，起止时间使用 时:分:秒 格式。
+  command_args=-ss {start} -i "{input}" -t {duration} -c:v libx264 -crf 20 -preset medium -c:a aac -b:a 128k -movflags +faststart "{output}"
+  param duration | label=时长 | kind=Text | default=00:00:30 | min=- | max=- | true_value=1 | false_value= | description=格式 时:分:秒，例如 00:00:30。 | options=[]
+  param start | label=开始时间 | kind=Text | default=00:00:00 | min=- | max=- | true_value=1 | false_value= | description=格式 时:分:秒，例如 00:01:30。 | options=[]
+---
+[44] key=special.image_sequence id=68de2d9c7fcc51408ef77343 sort_order=44 category=特殊处理 type=System name=画面 · 导出为图片序列（JPG）
+  flags=recommended:false output_extension=jpg target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[抽帧, 图片]
+  description=按指定帧率抽帧导出为一组 JPG。文件名会自动带上 4 位序号，例如输出名填 result 会生成 result_0001.jpg、result_0002.jpg ……
+  command_args=-i "{input}" -vf fps={fps} -q:v {jpgquality} "{output_pattern}"
+  param fps | label=抽帧频率 | kind=Select | default=1 | min=- | max=- | true_value=1 | false_value= | description= | options=["0.5"→"每 2 秒 1 张", "1"→"每秒 1 张", "2"→"每秒 2 张", "5"→"每秒 5 张"]
+  param jpgquality | label=图片质量 | kind=Select | default=3 | min=- | max=- | true_value=1 | false_value= | description=数值越小画质越高（JPEG qscale）。 | options=["2"→"高", "3"→"中（推荐）", "8"→"小"]
+---
+[45] key=special.thumbnail id=66ed57947759cf7c0e9ee90e sort_order=45 category=特殊处理 type=System name=画面 · 生成封面缩略图
+  flags=recommended:false output_extension=jpg target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[封面, 缩略图]
+  description=从指定时间点截取一张图片作为视频封面。
+  command_args=-ss {seek} -i "{input}" -frames:v 1 -vf "scale={width}:-2" -q:v 2 -pix_fmt yuvj420p "{output}"
+  param seek | label=截取时间 | kind=Text | default=00:00:01 | min=- | max=- | true_value=1 | false_value= | description=格式 时:分:秒，例如 00:00:05。 | options=[]
+  param width | label=宽度 (px) | kind=Select | default=1280 | min=- | max=- | true_value=1 | false_value= | description= | options=["640"→"640", "1280"→"1280", "1920"→"1920"]
+---
+[46] key=special.faststart id=86e13d8bf455658fac2c4a6b sort_order=46 category=特殊处理 type=System name=网络优化 · 仅重建索引（faststart）
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mov, m4v] required_filters=[] tags=[faststart, 网络, 无损]
+  description=不动画面和声音，只把索引移到文件开头，让视频可以先播后下。
+  command_args=-i "{input}" -c copy -movflags +faststart "{output}"
+---
+[47] key=special.fix_timestamps id=e3181b4e7a0c419607bfd1d6 sort_order=47 category=特殊处理 type=System name=网络优化 · 无损调整时间戳（修正音画不同步）
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[] required_filters=[] tags=[时间戳, 音画同步, 无损]
+  description=重新生成时间戳，修复某些录制工具产生的音画不同步问题。
+  command_args=-i "{input}" -c copy -fflags +genpts -avoid_negative_ts make_zero "{output}"
+---
+[48] key=special.soft_subtitle_track id=7de37fd6cb95c69792e3979a sort_order=48 category=特殊处理 type=System name=字幕 · 封装为可选字幕轨（不重新编码）
+  flags=recommended:false output_extension=mp4 target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, mov, m4v, webm, ts] required_filters=[] tags=[字幕, 软字幕, 无损]
+  description=把字幕作为可开关的字幕轨封装进 MP4（mov_text）。速度极快、画质无损，而且不依赖 libass，任何 FFmpeg 构建都能用。播放器里可以自由开关字幕。
+  command_args=-i "{input}" -i "{subtitle}" -map 0 -map 1:0 -c copy -c:s mov_text -movflags +faststart "{output}"
+  param subtitle | label=字幕文件路径 | kind=Text | default= | min=- | max=- | true_value=1 | false_value= | description=srt / ass 文件的完整路径。 | options=[]
+---
+[49] key=special.keep_all_tracks id=8369132fc89088d221c4e307 sort_order=49 category=特殊处理 type=System name=多音轨 · 保留全部音轨与字幕
+  flags=recommended:false output_extension=mkv target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, mov, avi, ts, webm, flv, m4v] required_filters=[] tags=[多音轨, 归档, 无损]
+  description=把所有音轨和字幕轨一起封装到 MKV，不做任何重新编码，适合归档原始素材。
+  command_args=-i "{input}" -map 0 -c copy "{output}"
+---
+[50] key=audio.copy_track id=b2468eb7748735527300de22 sort_order=50 category=音频处理 type=System name=音频 · 直接复制音轨（不重新编码）
+  flags=recommended:false output_extension=m4a target_codec=- hardware_mode=None required_encoder=- requires_hardware_acceleration=false
+  input_formats=[mp4, mkv, mov, flac, wav, ogg, m4a, aac, ts] required_filters=[] tags=[音频, 无损, 快速]
+  description=只把音轨取出来重新封装，不做任何编码，速度和音质都是最优。
+  command_args=-i "{input}" -vn -map 0:a:0 -c:a copy "{output}"
