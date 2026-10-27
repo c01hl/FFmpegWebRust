@@ -24,10 +24,25 @@ pub struct CliOptions {
     pub bind: Option<String>,
     pub no_browser: bool,
     pub data_dir: Option<String>,
+    /// 无法识别的参数（由调用方打印警告，避免静默忽略）
+    pub unknown: Vec<String>,
 }
 
 impl CliOptions {
-    /// 解析 `--port 8080` / `-p 8080` / `--bind 0.0.0.0` / `--no-browser` / `--data-dir /tmp/x`
+    /// 解析启动参数。
+    ///
+    /// 支持两种写法（GNU 风格与空格分隔都常见，早期只实现了后者，
+    /// 用户写 `--host=0.0.0.0` 会被**静默忽略**，排查起来非常费劲）：
+    ///
+    /// ```text
+    /// --port 8080     --port=8080     -p 8080     -p=8080
+    /// --bind 0.0.0.0  --bind=0.0.0.0  --host 0.0.0.0  --host=0.0.0.0
+    /// --data-dir /tmp/x               --data-dir=/tmp/x
+    /// --no-browser
+    /// ```
+    ///
+    /// 无法识别的参数会收集到 `unknown`，由调用方打印警告 —— 静默忽略是上一次
+    /// `--host=0.0.0.0` 不生效的根因。
     pub fn parse<I, S>(args: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -37,33 +52,47 @@ impl CliOptions {
         let mut options = CliOptions::default();
         let mut index = 0;
 
-        // 取下一个参数作为选项的值（没有下一个就返回 None）
-        fn value_at(args: &[String], index: usize) -> Option<String> {
-            args.get(index + 1).map(|v| v.trim().to_string())
+        /// 取选项的值：优先 `--flag=value` 里的，否则用下一个参数（并跳过它）。
+        ///
+        /// 下一个参数如果本身像选项（以 `-` 开头），就认为没给值，不吞掉它 ——
+        /// 否则 `--port --no-browser` 会把 `--no-browser` 当成端口值。
+        fn take_value(args: &[String], index: &mut usize, inline: Option<&str>) -> Option<String> {
+            if let Some(value) = inline {
+                let value = value.trim();
+                return if value.is_empty() { None } else { Some(value.to_string()) };
+            }
+
+            let next = args.get(*index + 1)?.trim().to_string();
+            if next.is_empty() || next.starts_with('-') {
+                return None;
+            }
+            *index += 1;
+            Some(next)
         }
 
         while index < args.len() {
-            match args[index].as_str() {
+            let raw = args[index].clone();
+            let (flag, inline) = match raw.split_once('=') {
+                Some((flag, value)) => (flag.to_string(), Some(value)),
+                None => (raw.clone(), None),
+            };
+
+            match flag.as_str() {
                 "--port" | "-p" => {
-                    if let Some(port) = value_at(&args, index).and_then(|v| v.parse::<u16>().ok()) {
+                    if let Some(port) = take_value(&args, &mut index, inline).and_then(|v| v.parse::<u16>().ok()) {
                         options.port = Some(port);
-                        index += 1;
                     }
                 }
                 "--bind" | "--host" => {
-                    if let Some(bind) = value_at(&args, index).filter(|v| !v.is_empty()) {
-                        options.bind = Some(bind);
-                        index += 1;
-                    }
+                    options.bind = take_value(&args, &mut index, inline).or(options.bind);
                 }
                 "--data-dir" => {
-                    if let Some(dir) = value_at(&args, index).filter(|v| !v.is_empty()) {
-                        options.data_dir = Some(dir);
-                        index += 1;
-                    }
+                    options.data_dir = take_value(&args, &mut index, inline).or(options.data_dir);
                 }
                 "--no-browser" => options.no_browser = true,
-                _ => {}
+                // 第一个参数通常是程序名（有些调用方式会带上），不算未知参数
+                _ if index == 0 && !flag.starts_with('-') => {}
+                _ => options.unknown.push(raw),
             }
 
             index += 1;
@@ -199,10 +228,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_accepts_equals_form() {
+        // `--host=0.0.0.0` 曾被静默忽略，导致用户以为绑定了却还是 localhost
+        let options = CliOptions::parse(["--host=0.0.0.0", "--port=8080"]);
+        assert_eq!(options.bind.as_deref(), Some("0.0.0.0"));
+        assert_eq!(options.port, Some(8080));
+        assert!(options.unknown.is_empty());
+
+        let options = CliOptions::parse(["--data-dir=/tmp/x", "-p=9000"]);
+        assert_eq!(options.data_dir.as_deref(), Some("/tmp/x"));
+        assert_eq!(options.port, Some(9000));
+    }
+
+    #[test]
+    fn parse_does_not_swallow_following_flag_as_value() {
+        let options = CliOptions::parse(["--port", "--no-browser"]);
+        assert_eq!(options.port, None, "--no-browser 不能被当成端口值");
+        assert!(options.no_browser);
+        assert!(options.unknown.is_empty(), "--no-browser 仍应被识别");
+    }
+
+    #[test]
+    fn parse_reports_unknown_flags() {
+        let options = CliOptions::parse(["--nope", "--host", "127.0.0.1"]);
+        assert_eq!(options.unknown, vec!["--nope".to_string()]);
+        assert_eq!(options.bind.as_deref(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn parse_tolerates_leading_program_name() {
+        let options = CliOptions::parse(["ffmpeg-web-rust", "--port=8080"]);
+        assert!(options.unknown.is_empty(), "第一个位置参数不算未知选项");
+        assert_eq!(options.port, Some(8080));
+    }
+
+    #[test]
     fn parse_ignores_unknown_and_missing_values() {
         let options = CliOptions::parse(["--port", "abc", "--wat", "--bind"]);
         assert_eq!(options.port, None);
         assert_eq!(options.bind, None);
+        assert_eq!(options.unknown, vec!["--wat".to_string()]);
     }
 
     #[test]

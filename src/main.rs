@@ -18,6 +18,17 @@ async fn main() -> anyhow::Result<()> {
 
     let options = CliOptions::parse(std::env::args().skip(1)).merge_env();
 
+    // 静默忽略未知参数是最难排查的一类问题（`--host=0.0.0.0` 曾因此不生效），
+    // 所以这里显式提示，并给出正确的写法。
+    if !options.unknown.is_empty() {
+        eprintln!(
+            "警告：以下参数无法识别，已被忽略：{}\n\
+             可用参数：--port <端口> / -p <端口> / --bind <地址>（--host 同义） / --data-dir <目录> / --no-browser\n\
+             等号写法同样支持：--host=0.0.0.0 --port=8080",
+            options.unknown.join(" ")
+        );
+    }
+
     // `--data-dir` 必须在任何 paths::* 调用之前落地（它与环境变量走同一条路径）
     if let Some(dir) = options.data_dir.clone() {
         // SAFETY: 单线程启动阶段，尚未创建读取环境变量的线程
