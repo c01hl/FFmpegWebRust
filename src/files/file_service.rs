@@ -152,31 +152,36 @@ fn trim_trailing_zeros(value: f64) -> String {
 }
 
 /// 在系统文件管理器中显示目标
+///
+/// 三个平台的参数形态完全不同（macOS 是 `open -R <路径>`，Windows 是
+/// `explorer /select,<路径>`，Linux 的 `xdg-open` 只能打开目录），所以每个分支
+/// **各自构造命令、不共享中间变量** —— 共享变量在别的平台分支里会变成「未使用」，
+/// Linux 构建会因此报 `unused variable` 警告（macOS 上反而看不到）。
 pub fn reveal_in_file_manager(path: &str) -> Result<(), String> {
     let target = crate::paths::to_absolute(path);
     if !target.exists() {
         return Err(format!("路径不存在：{}", target.to_string_lossy()));
     }
-    let target_arg = target.to_string_lossy().to_string();
 
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut c = std::process::Command::new("open");
-        c.arg("-R").arg(&target_arg);
+        c.arg("-R").arg(&target);
         c
     };
     #[cfg(target_os = "windows")]
     let mut command = {
         let mut c = std::process::Command::new("explorer");
-        c.arg(format!("/select,{target_arg}"));
+        c.arg(format!("/select,{}", target.to_string_lossy()));
         c
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut command = {
+        // `xdg-open` 没有「选中某个文件」的语义，退化为打开它所在的目录
         let directory = if target.is_dir() {
             target.clone()
         } else {
-            target.parent().map(std::path::PathBuf::from).unwrap_or(target.clone())
+            target.parent().map(std::path::PathBuf::from).unwrap_or_else(|| target.clone())
         };
         let mut c = std::process::Command::new("xdg-open");
         c.arg(directory);
