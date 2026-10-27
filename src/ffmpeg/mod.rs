@@ -212,6 +212,10 @@ pub(crate) mod util {
     /// `/bin/kill` 不可用时退化为只杀直接子进程。Windows：只杀直接子进程
     /// （不引入新依赖，无法调用 Job Object / `taskkill /T`）。
     pub async fn kill_process_tree(pid: Option<u32>, child: &mut tokio::process::Child) {
+    // Windows 分支只杀直接子进程（不引入 Job Object），用不到 pid；
+    // 显式消费掉，否则 Windows 构建会报 `unused variable: pid`（Linux 的同类问题见 file_service）。
+    #[cfg(not(unix))]
+    let _ = pid;
         #[cfg(unix)]
         if let Some(pid) = pid {
             let status = tokio::process::Command::new("/bin/kill")
