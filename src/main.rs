@@ -46,16 +46,32 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("无法监听 {}（端口可能已被占用）", listen.socket_addr()))?;
     let bound = listener.local_addr()?;
-    let url = format!("http://localhost:{}", bound.port());
+    // 浏览器永远走回环地址（即使监听在 0.0.0.0，本机也应该用 localhost 打开）
+    let browser_url = format!("http://localhost:{}", bound.port());
 
-    tracing::info!("服务已启动：{url}（默认仅本机可访问）");
+    if listen.loopback_only {
+        tracing::info!("服务已启动：{browser_url}（仅本机可访问）");
+    } else {
+        // 监听在 0.0.0.0 / 具体 IP 时，把真实的可访问地址打出来，避免用户以为还是只能本机访问
+        let display_host = if listen.bind == "0.0.0.0" || listen.bind == "[::]" || listen.bind == "::" {
+            "<本机局域网 IP>".to_string()
+        } else {
+            listen.bind.clone()
+        };
+        tracing::info!("服务已启动：http://{display_host}:{}（监听 {}，可从局域网访问）", bound.port(), listen.bind);
+        tracing::warn!(
+            "注意：本程序能在本机执行 FFmpeg 并读写任意文件，且没有登录校验。\
+             暴露到局域网前请确认这是你想要的效果，或在前面加一层带认证的反向代理。"
+        );
+    }
+
     if !ffmpeg_web_rust::web_assets::frontend_available() {
         tracing::warn!("内嵌的前端产物为空。请先执行 `cd web && pnpm install && pnpm build`，然后重新 `cargo build`。");
     }
 
     if auto_open_browser {
         // 稍等片刻再打开，避免浏览器先于监听就绪
-        let target = url.clone();
+        let target = browser_url;
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             cli::open_browser(&target);
